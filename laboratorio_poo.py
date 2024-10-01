@@ -11,6 +11,10 @@ Requisitos:
 *Manejar errores con bloques try-except para validar entradas y gestionar excepciones.
 *Persistir los datos en archivo JSON.
 """""""""
+
+import mysql.connector
+from mysql.connector import Error
+from decouple import config
 import json
 
 class Producto:
@@ -153,85 +157,190 @@ class ProductoAlimenticio(Producto):
         return f"{super().__str__()} - El vencimiento del producto alimenticio en dias es:{self.vencimiento}"
     
 class GestionProducto:
-    def __init__(self, archivo):
-        self.archivo = archivo
+    def __init__(self):
+        self.host = config('DB_HOST')
+        self.database= config('DB_NAME')
+        self.user = config('DB_USER')
+        self.password = config('DB_PASSWORD')
+        self.port = config('DB_PORT')
 
-    def leer_datos(self):
+    def connect(self):
+        '''Establecer una conexion con la base de datos'''
         try:
-            with open(self.archivo, 'r') as file:
-                datos = json.load(file)
-        except FileNotFoundError:
-            return {}
-        except Exception as error:
-            raise Exception(f'Error al leer datos del archivo: {error}')
-        else:
-            return datos
-
-    def guardar_datos(self, datos):
-        try:
-            with open(self.archivo, 'w') as file:
-                json.dump(datos, file, indent=4)
-        except IOError as error:
-            print(f'Error al intentar guardar los datos en {self.archivo}: {error}')
-        except Exception as error:
-            print(f'Error inesperado: {error}')
+            connection = mysql.connector.connect(
+                host = self.host,
+                database = self.database,
+                user = self.user,
+                password= self.password,
+                port= self.port
+            )
+            if connection.is_connected():
+                return connection
+              
+        except Error as e:
+            print(f'Error al conectar la base de datos: {e}')
+            return None
 
     def crear_producto(self, producto):
         try:
-            datos = self.leer_datos()
-            idproducto = producto.idproducto
-            if not str(idproducto) in datos.keys():
-                datos[idproducto] = producto.to_dict()
-                self.guardar_datos(datos)
-                print(f'El Guardado de datos del producto fue exitoso.')
-            else:
-                print(f'Producto con el Id ingresado ({idproducto}) ya existe, intentelo nuevamente.')
+            connection = self.connect()
+            if connection:
+                with connection.cursor() as cursor:
+                    #Verificamos si existe
+                    cursor.execute('SELECT idproducto FROM producto WHERE idproducto = %s',(producto.idproducto,))
+                    if cursor.fetchone():
+                        print(f'Error: Ya existe el producto con ese ID.')
+                        return
+                    #Inserto el producto dependiendo si es electronico o alimenticio
+                    if isinstance(producto, ProductoElectronico):
+                        query ='''
+                        INSERT INTO producto (nombre, precio, cantidad, idproducto, marca)
+                        VALUES(%s, %s, %s, %s, %s)                     
+                        '''
+                        cursor.execute(query,(producto.nombre, producto.precio, 
+                                              producto.cantidad, producto.idproducto, producto.marca))
+                        
+                        query = '''
+                        INSERT INTO productoelectronico(idproducto, garantia)
+                        VALUES(%s, %s)
+                        '''
+                        cursor.execute(query,(producto.idproducto, producto.garantia))
+
+                    elif isinstance(producto, ProductoAlimenticio):
+                        query ='''
+                        INSERT INTO producto (nombre, precio, cantidad, idproducto, marca)
+                        VALUES(%s, %s, %s, %s, %s)                     
+                        '''
+                        cursor.execute(query,(producto.nombre, producto.precio, 
+                                              producto.cantidad, producto.idproducto, producto.marca))
+                        query = '''
+                        INSERT INTO productoalimenticio(idproducto, vencimiento)
+                        VALUES(%s, %s)
+                        '''
+                        cursor.execute(query,(producto.idproducto, producto.vencimiento))
+                    connection.commit()
+                    print(f'Producto con nombre: {producto.nombre} y Id: {producto.idproducto} fue creado correctamente.')
+
         except Exception as error:
             print(f'Error inesperado al crear el producto: {error}')
 
     def leer_producto(self, idproducto):
         try:
-            datos = self.leer_datos()
-            if idproducto in datos:
-                producto_data = datos[idproducto]
-                if "garantia" in producto_data:
-                    producto = ProductoElectronico(**producto_data)
-                    print(f"Producto encontrado con IdProducto {idproducto} es:")
-                    print(f"{producto_data}")
-                else:
-                    producto = ProductoAlimenticio(**producto_data)
-                    print(f"Producto encontrado con IdProducto {idproducto} es:")
-                    print(f"{producto_data}")
-            else:
-                 print(f"Producto no encontrado con IdProducto {idproducto}")
+            connection = self.connect()
+            if connection:
+                with connection.cursor(dictionary=True) as cursor:
+                    cursor.execute('SELECT * FROM producto WHERE idproducto = %s', (idproducto,))
+                    producto_data = cursor.fetchone()
 
-        except Exception as e: 
-            print(f"Error no al leer el producto deseado: {e}")
+                    if producto_data:
+                        cursor.execute('SELECT garantia FROM productoelectronico WHERE idproducto = %s', (idproducto,))
+                        garantia = cursor.fetchone()
+                        if garantia:
+                            producto_data['garantia'] = garantia['garantia']
+                            producto = ProductoElectronico(**producto_data)
+                        else:
+                            cursor.execute('SELECT vencimiento FROM productoalimenticio WHERE idproducto = %s', (idproducto,))
+                            vencimiento = cursor.fetchone()
+                            if vencimiento:
+                                producto_data['vencimiento'] = vencimiento['vencimiento']
+                                producto = ProductoAlimenticio(**producto_data)
+                            else:
+                                producto = Producto(**producto_data)
+                        print(f'Producto encontrado: {producto}')
+                    else:
+                        print(f'No se encontró el producto con ID: {idproducto}.')
+                    
 
-
+        except Error as e:
+            print(f"Error al leer el producto deseado: {e}")
+        finally:
+            if connection.is_connected():
+                connection.close()
 
     def actualizar_producto(self,idproducto , nuevo_precio):
+        '''Actualizar precio del producto'''
         try:
-            datos = self.leer_datos()
-            if str(idproducto) in datos.keys():
-                datos[idproducto]["precio"] = nuevo_precio
-                self.guardar_datos(datos)
-                print(f"El precio del producto con ID ({idproducto}) se actualizo correctamente.")
-            else:
-                print(f"No existe el producto con ID ({idproducto}).")
+            connection = self.connect()
+            if connection:
+                with connection.cursor() as cursor:
+                    #Verificar si existe un producto con el id a buscar
+                    cursor.execute('SELECT * FROM producto WHERE idproducto = %s',(idproducto,))
+                    if not cursor.fetchone():
+                        print(f"No se encontro producto con el ID:{idproducto}.")
+                        return
+                
+                    #Actualizar precio
+                    cursor.execute('UPDATE producto SET precio = %s WHERE idproducto = %s',(nuevo_precio, idproducto))
+                    if cursor.rowcount > 0:
+                        connection.commit()
+                        print(f'El precio del producto se actualizo y es: {nuevo_precio} con ID:{idproducto}')
+                    else:
+                        print(f'El producto con ID:{idproducto} no fue encontrado.')
         except Exception as e:
             print(f"Error al actualizar el producto: {e}")
-
+        finally:
+            if connection.is_connected():
+                connection.close()
 
     def eliminar_producto(self,idproducto ):
+
         try:
-            datos = self.leer_datos()
-            if str(idproducto) in datos.keys():
-                del datos[idproducto]
-                self.guardar_datos(datos)
-                print(f"El producto con ID ({idproducto}) se elimino.")
-            else:
-                print(f"No existe el producto con ID ({idproducto}).")
+            connection = self.connect()
+            if connection:
+                with connection.cursor() as cursor:
+                    #Verificar si existe un producto con el id a buscar
+                    cursor.execute('SELECT * FROM producto WHERE idproducto = %s',(idproducto,))
+                    if not cursor.fetchone():
+                        print(f"No se encontro producto con el ID:{idproducto}.")
+                        return
+                
+                    #Eliminar el producto
+                    cursor.execute('DELETE FROM productoelectronico WHERE idproducto = %s',(idproducto,))
+                    cursor.execute('DELETE FROM productoalimenticio WHERE idproducto = %s',(idproducto,))
+                    cursor.execute('DELETE FROM producto WHERE idproducto = %s',(idproducto,))
+                    if cursor.rowcount > 0:
+                        connection.commit()
+                        print(f'El producto con ID:{idproducto} fue eliminado correctamente')
+                    else:
+                        print(f'No se encontro el producto con ID: {idproducto}')          
+
         except Exception as e:
             print(f"Error al eliminar el producto: {e}")
-        
+        finally:
+            if connection.is_connected():
+                connection.close()
+            
+    def leer_todos_los_productos(self):
+        try:
+            connection = self.connect()
+            if connection:
+                with connection.cursor(dictionary=True) as cursor:
+                    cursor.execute('SELECT * FROM producto')
+                    productos_data = cursor.fetchall()
+                    
+                    producto2 = []
+
+                    for producto_data in productos_data:
+                        idproducto = producto_data['idproducto']
+
+                        cursor.execute('SELECT garantia FROM productoelectronico WHERE idproducto = %s', (idproducto,))
+                        garantia = cursor.fetchone()
+
+                        if garantia:
+                            producto_data['garantia'] = garantia['garantia']
+                            productos = ProductoElectronico(**producto_data)
+                        else:
+                            cursor.execute('SELECT vencimiento FROM productoalimenticio WHERE idproducto = %s', (idproducto,))
+                            vencimiento = cursor.fetchone()
+                            producto_data['vencimiento'] = vencimiento['vencimiento']
+                            productos = ProductoAlimenticio(**producto_data)
+
+                        producto2.append(productos)       
+
+        except Exception as e:
+            print(f"Error mostrar los productos: {e}")
+        else:
+            return producto2
+        finally:
+            if connection.is_connected():
+                connection.close()

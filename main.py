@@ -51,30 +51,52 @@ def agregar_producto(gestion, tipo_producto):
 
 
 def buscar_producto_por_id(gestion):
-    idproducto = input("Ingrese el id del producto: ")
-    gestion.leer_producto(idproducto)
-    input("Presione enter para continuar..")
-    
+    try:
+        idproducto = input("Ingrese el id del producto: ")
+        gestion.leer_producto(idproducto)
+    except Exception as e:
+        print(f"Error al buscar el producto con ID: {idproducto}: {e}")
+    finally:
+        input("Presione enter para continuar..")
+
 
 def actualizar_precio_producto(gestion):
-    idproducto = input("Ingrese el id del producto para actualizar su precio: ")
-    precio = float(input("Ingrese el precio del producto: "))
-    gestion.actualizar_producto(idproducto, precio)
-    input("Presione enter para continuar..")
+    try:
+        idproducto = input("Ingrese el id del producto para actualizar su precio: ")
+        precio = float(input("Ingrese el precio del producto: "))
+        gestion.actualizar_producto(idproducto, precio)
+    except ValueError:
+        print("Ingrese un valor numérico válido para el precio.")
+    except KeyError:
+        print(f"No se encontró ningún producto con el ID '{idproducto}'.")
+    except Exception as e:
+        print(f"Ocurrió un error inesperado: {e}")
+    finally:
+        input("Presione enter para continuar..")
 
 def eliminar_producto_por_id(gestion):
+    try:
         idproducto = input("Ingrese el id del producto para eliminarlo: ")
         gestion.eliminar_producto(idproducto)
+    except Exception as e:
+        print(f"Error al eliminar el producto con ID: {idproducto}: {e}")
+    finally:
         input("Presione enter para continuar..")
 
 
 def mostrar_todos_los_productos(gestion):
     print("========== Listado completo de los productos en stock ==========")
-    for producto in gestion.leer_datos().values():
-        if "garantia" in producto:
-            print(f"Nombre:{producto['nombre']} - Precio:{producto['precio']} - Cantidad:{producto['cantidad']} - IdProducto:{producto['idproducto']} - Marca:{producto['marca']} - Garantia:{producto['garantia']}.")
-        else:
-            print(f"Nombre:{producto['nombre']} - Precio:{producto['precio']} - Cantidad:{producto['cantidad']} - IdProducto:{producto['idproducto']}  - Marca:{producto['marca']}  - Vencimiento:{producto['vencimiento']}.")
+    try:
+        producto = gestion.leer_todos_los_productos()
+        for producto1 in producto:
+            if isinstance(producto1, ProductoElectronico):
+                print(f'ID:{producto1.idproducto}, Nombre:{producto1.nombre}, Garantia:{producto1.garantia} meses.')
+            elif isinstance(producto1, ProductoAlimenticio):
+                print(f'ID:{producto1.idproducto}, Nombre:{producto1.nombre}, Vencimiento:{producto1.vencimiento} dias.')
+
+    except Exception as e:
+        print(f'Error al mostrar los productos.')
+        
     print("================================================================")
     input("Presione enter para continuar..")
            
@@ -82,8 +104,7 @@ def mostrar_todos_los_productos(gestion):
 
 if __name__ == "__main__":
 
-    archivo_productos = "productos_db.json"
-    gestion = GestionProducto(archivo_productos)
+    gestion = GestionProducto()
     while True:
         limpiar_pantalla()
         mostrar_menu()
